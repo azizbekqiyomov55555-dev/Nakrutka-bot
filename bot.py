@@ -4,9 +4,9 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import CommandStart
 
-TOKEN = "BOT_TOKEN"
-API_URL = "https://panelapi.example.com/api/v2"
-API_KEY = "API_KEY"
+TOKEN = "8066717720:AAEe3NoBcug1rTFT428HEBmJriwiutyWtr8"
+API_URL = "https://saleseen.uz/api/v2"
+API_KEY = "5b876c02152a57b753694f91194d96b8"
 
 bot = Bot(TOKEN)
 dp = Dispatcher()
