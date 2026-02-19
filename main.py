@@ -12,7 +12,7 @@ from aiogram.filters import CommandStart
 
 # ================= CONFIG =================
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+ADMIN_ID = "8537782289"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
