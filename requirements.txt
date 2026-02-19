@@ -1,2 +1,1 @@
-aiogram
-aiohttp
+pip install aiogram aiosqlite
