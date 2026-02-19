@@ -1,101 +1,110 @@
 import asyncio
-import aiohttp
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import (
+    Message, InlineKeyboardMarkup, InlineKeyboardButton
+)
 from aiogram.filters import CommandStart
+import aiosqlite
 
 TOKEN = "8066717720:AAEe3NoBcug1rTFT428HEBmJriwiutyWtr8"
-API_URL = "https://saleseen.uz/api/v2"
-API_KEY = "5b876c02152a57b753694f91194d96b8"
+ADMIN_ID = 8537782289
 
 bot = Bot(TOKEN)
 dp = Dispatcher()
 
-# ===== MENU =====
+user_state = {}
 
-menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="🛍 Xizmatlar")],
-        [KeyboardButton(text="💰 Balans")],
-        [KeyboardButton(text="📦 Buyurtma berish")]
-    ],
-    resize_keyboard=True
-)
+# ================= DATABASE =================
 
-# ===== API FUNCTIONS =====
+async def init_db():
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS users(
+            user_id INTEGER PRIMARY KEY,
+            balance INTEGER DEFAULT 0
+        )
+        """)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS orders(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            service TEXT,
+            quantity INTEGER,
+            price INTEGER,
+            status TEXT
+        )
+        """)
+        await db.commit()
 
-async def api_request(data):
-    async with aiohttp.ClientSession() as session:
-        async with session.post(API_URL, data=data) as r:
-            return await r.json()
+async def add_user(uid):
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (uid,))
+        await db.commit()
 
-async def get_services():
-    return await api_request({
-        "key": API_KEY,
-        "action": "services"
-    })
+async def get_balance(uid):
+    async with aiosqlite.connect("bot.db") as db:
+        async with db.execute("SELECT balance FROM users WHERE user_id=?", (uid,)) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else 0
 
-async def get_balance():
-    return await api_request({
-        "key": API_KEY,
-        "action": "balance"
-    })
+async def update_balance(uid, amount):
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, uid))
+        await db.commit()
 
-async def create_order(service, link, quantity):
-    return await api_request({
-        "key": API_KEY,
-        "action": "add",
-        "service": service,
-        "link": link,
-        "quantity": quantity
-    })
+async def create_order(uid, service, quantity, price):
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute(
+            "INSERT INTO orders(user_id,service,quantity,price,status) VALUES(?,?,?,?,?)",
+            (uid, service, quantity, price, "Jarayonda")
+        )
+        await db.commit()
 
-# ===== START =====
+# ================= START =================
 
 @dp.message(CommandStart())
 async def start(msg: Message):
-    await msg.answer("👋 Nakrutka botga xush kelibsiz!", reply_markup=menu)
+    await add_user(msg.from_user.id)
 
-# ===== BALANCE =====
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Xizmatlar", callback_data="services")],
+        [InlineKeyboardButton(text="💰 Hisobim", callback_data="balance")],
+        [InlineKeyboardButton(text="📦 Buyurtmalarim", callback_data="orders")],
+        [InlineKeyboardButton(text="💵 Hisob to‘ldirish", callback_data="topup")]
+    ])
 
-@dp.message(F.text == "💰 Balans")
-async def balance(msg: Message):
-    data = await get_balance()
+    await msg.answer("👋 Xush kelibsiz!", reply_markup=kb)
 
-    if "balance" in data:
-        await msg.answer(f"💰 Balans: {data['balance']}")
-    else:
-        await msg.answer("❌ Balans olinmadi")
+# ================= SERVICES =================
 
-# ===== SERVICES =====
+services_list = {
+    "Instagram Reklama": 50,
+    "Telegram Reklama": 40,
+    "Dizayn Xizmati": 100
+}
 
-@dp.message(F.text == "🛍 Xizmatlar")
-async def services(msg: Message):
-    await msg.answer("⏳ Yuklanmoqda...")
+@dp.callback_query(F.data == "services")
+async def services(call):
+    buttons = []
+    for name in services_list:
+        buttons.append([InlineKeyboardButton(text=name, callback_data=f"service:{name}")])
 
-    data = await get_services()
+    await call.message.edit_text(
+        "Xizmatni tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
 
-    if isinstance(data, list):
-        text = "📦 Xizmatlar:\n\n"
+@dp.callback_query(F.data.startswith("service:"))
+async def select_service(call):
+    service = call.data.split(":")[1]
+    user_state[call.from_user.id] = {"service": service}
 
-        for s in data[:15]:
-            text += f"🆔 {s['service']}\n{s['name']}\n💰 {s['rate']}\n\n"
+    await call.message.answer("Miqdor kiriting:")
 
-        await msg.answer(text)
-    else:
-        await msg.answer("❌ API xato")
-
-# ===== ORDER FLOW =====
-
-user_state = {}
-
-@dp.message(F.text == "📦 Buyurtma berish")
-async def order_start(msg: Message):
-    user_state[msg.from_user.id] = {}
-    await msg.answer("🆔 Xizmat ID kiriting:")
+# ================= ORDER FLOW =================
 
 @dp.message()
-async def order_process(msg: Message):
+async def process(msg: Message):
     uid = msg.from_user.id
 
     if uid not in user_state:
@@ -103,38 +112,75 @@ async def order_process(msg: Message):
 
     state = user_state[uid]
 
-    if "service" not in state:
-        state["service"] = msg.text
-        await msg.answer("🔗 Link yuboring:")
-        return
-
-    if "link" not in state:
-        state["link"] = msg.text
-        await msg.answer("🔢 Miqdor kiriting:")
-        return
-
     if "quantity" not in state:
-        state["quantity"] = msg.text
+        if not msg.text.isdigit():
+            await msg.answer("Raqam kiriting")
+            return
 
-        await msg.answer("⏳ Buyurtma yuborilmoqda...")
+        quantity = int(msg.text)
+        price_per_unit = services_list[state["service"]]
+        total_price = quantity * price_per_unit
 
-        result = await create_order(
-            state["service"],
-            state["link"],
-            state["quantity"]
+        balance = await get_balance(uid)
+
+        if balance < total_price:
+            await msg.answer(f"❌ Balans yetarli emas.\nKerak: {total_price}\nBalans: {balance}")
+            del user_state[uid]
+            return
+
+        await update_balance(uid, -total_price)
+        await create_order(uid, state["service"], quantity, total_price)
+
+        await msg.answer(f"✅ Buyurtma yaratildi!\nNarx: {total_price}")
+        await bot.send_message(
+            ADMIN_ID,
+            f"Yangi buyurtma\nUser: {uid}\nXizmat: {state['service']}\nMiqdor: {quantity}\nNarx: {total_price}"
         )
-
-        if "order" in result:
-            await msg.answer(f"✅ Buyurtma yaratildi!\nID: {result['order']}")
-        else:
-            await msg.answer("❌ Buyurtma xato")
 
         del user_state[uid]
 
-# ===== RUN =====
+# ================= BALANCE =================
+
+@dp.callback_query(F.data == "balance")
+async def balance(call):
+    bal = await get_balance(call.from_user.id)
+    await call.message.answer(f"💰 Balans: {bal}")
+
+# ================= ORDERS =================
+
+@dp.callback_query(F.data == "orders")
+async def orders(call):
+    async with aiosqlite.connect("bot.db") as db:
+        async with db.execute("SELECT service,quantity,price,status FROM orders WHERE user_id=?", (call.from_user.id,)) as cur:
+            data = await cur.fetchall()
+
+    if not data:
+        await call.message.answer("Buyurtmalar yo‘q")
+    else:
+        text = ""
+        for s, q, p, st in data:
+            text += f"{s}\nMiqdor: {q}\nNarx: {p}\nHolat: {st}\n\n"
+        await call.message.answer(text)
+
+# ================= ADMIN BALANCE ADD =================
+
+@dp.message(F.text.startswith("/add"))
+async def add_balance(msg: Message):
+    if msg.from_user.id != ADMIN_ID:
+        return
+
+    parts = msg.text.split()
+    uid = int(parts[1])
+    amount = int(parts[2])
+
+    await update_balance(uid, amount)
+    await msg.answer("Balans qo‘shildi")
+
+# ================= RUN =================
 
 async def main():
-    print("✅ Nakrutka bot ishga tushdi")
+    await init_db()
+    print("PRO BOT ISHGA TUSHDI")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
