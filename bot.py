@@ -7,13 +7,20 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
 # --- SOZLAMALAR ---
 API_TOKEN = '8066717720:AAEe3NoBcug1rTFT428HEBmJriwiutyWtr8'
 ADMIN_ID = 8537782289 # O'zingizning ID raqamingiz
 
 logging.basicConfig(level=logging.INFO)
-bot = Bot(token=API_TOKEN, parse_mode="HTML")
+
+# Aiogram 3.x uchun Bot obyektini to'g'ri yaratish
+bot = Bot(
+    token=API_TOKEN, 
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 dp = Dispatcher(storage=MemoryStorage())
 
 # --- BAZANI SOZLASH ---
@@ -37,7 +44,7 @@ class AdminStates(StatesGroup):
     add_money_id = State()
     add_money_amount = State()
 
-# --- ASOSIY KLAVIATURA ---
+# --- ASOSIY KLAVIATURA (Rasmda ko'ringan barcha tugmalar) ---
 def main_menu():
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🛍 Xizmatlar"), types.KeyboardButton(text="📲 Nomer olish"))
@@ -47,11 +54,11 @@ def main_menu():
     builder.row(types.KeyboardButton(text="🤝 Hamkorlik"))
     return builder.as_markup(resize_keyboard=True)
 
-# --- START VA REFERAL ---
+# --- START ---
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message, command: CommandObject):
     user_id = message.from_user.id
-    ref_id = command.args # start dan keyingi id
+    ref_id = command.args
     
     conn = sqlite3.connect("sale_seen.db")
     cursor = conn.cursor()
@@ -82,12 +89,6 @@ async def profile(message: types.Message):
     conn.close()
     await message.answer(f"👤 <b>Profilingiz:</b>\n\n🆔 ID: <code>{message.from_user.id}</code>\n💰 Balans: <b>{res[0]} so'm</b>\n👥 Referallar: <b>{res[1]} ta</b>")
 
-@dp.message(F.text == "👥 Pul ishlash")
-async def earn(message: types.Message):
-    me = await bot.get_me()
-    link = f"https://t.me/{me.username}?start={message.from_user.id}"
-    await message.answer(f"🎁 <b>Do'stlarni taklif qilib pul ishlang!</b>\n\nHar bir do'stingiz uchun 500 so'm beriladi.\n\n🔗 Havolangiz:\n{link}")
-
 @dp.message(F.text == "🛍 Xizmatlar")
 async def services(message: types.Message):
     builder = InlineKeyboardBuilder()
@@ -97,25 +98,15 @@ async def services(message: types.Message):
     builder.adjust(1)
     await message.answer("👇 <b>Xizmat turini tanlang:</b>", reply_markup=builder.as_markup())
 
+@dp.message(F.text == "👥 Pul ishlash")
+async def earn(message: types.Message):
+    me = await bot.get_me()
+    link = f"https://t.me/{me.username}?start={message.from_user.id}"
+    await message.answer(f"🎁 <b>Do'stlarni taklif qilib pul ishlang!</b>\n\n🔗 Havolangiz:\n{link}")
+
 @dp.message(F.text == "🤝 Hamkorlik")
 async def collab(message: types.Message):
-    await message.answer("🤝 <b>Hamkorlik bo'yicha adminga yozing:</b>\n\nAdmin: @Sizning_Usernamengiz")
-
-# --- ADMIN PANEL (FAQAT ADMIN UCHUN) ---
-@dp.message(Command("admin"))
-async def admin_panel(message: types.Message):
-    if message.from_user.id == ADMIN_ID:
-        builder = InlineKeyboardBuilder()
-        builder.add(types.InlineKeyboardButton(text="📊 Statistika", callback_data="adm_stats"))
-        builder.add(types.InlineKeyboardButton(text="➕ Pul qo'shish", callback_data="adm_add"))
-        await message.answer("🛠 <b>Admin Panel:</b>", reply_markup=builder.as_markup())
-
-@dp.callback_query(F.data == "adm_stats")
-async def adm_stats(call: types.CallbackQuery):
-    conn = sqlite3.connect("sale_seen.db")
-    count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    conn.close()
-    await call.message.answer(f"👥 Bot azolari: {count} ta")
+    await message.answer("🤝 <b>Hamkorlik bo'yicha adminga yozing:</b> @Admin_User")
 
 # --- QOLGAN TUGMALAR ---
 @dp.message(F.text.in_({"📲 Nomer olish", "🛒 Buyurtmalarim", "💰 Hisob To'ldirish", "📞 Murojaat", "☎️ Qo'llab-quvvatlash"}))
@@ -129,6 +120,6 @@ async def main():
 if __name__ == '__main__':
     try:
         asyncio.run(main())
-    except Exception as e:
-        logging.error(f"Xato: {e}")
-    
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Bot to'xtatildi")
+        
