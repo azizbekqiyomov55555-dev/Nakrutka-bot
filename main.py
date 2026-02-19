@@ -5,8 +5,7 @@ import time
 import os
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
-    Message, ReplyKeyboardMarkup, KeyboardButton,
-    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+    Message, ReplyKeyboardMarkup, KeyboardButton
 )
 from aiogram.filters import CommandStart
 
@@ -14,11 +13,19 @@ from aiogram.filters import CommandStart
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = os.getenv("ADMIN_ID")
 
+if not TOKEN:
+    raise ValueError("BOT_TOKEN topilmadi! Railway Variables ga qo‘shing.")
+
+if not ADMIN_ID:
+    raise ValueError("ADMIN_ID topilmadi! Railway Variables ga qo‘shing.")
+
+ADMIN_ID = int(ADMIN_ID)
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # ================= DATABASE =================
-conn = sqlite3.connect("casino.db")
+conn = sqlite3.connect("casino.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
@@ -110,7 +117,12 @@ async def start(message: Message, command: CommandStart):
 async def profile(message: Message):
     cursor.execute("SELECT balance,total_bet FROM users WHERE user_id=?",
                    (message.from_user.id,))
-    bal,total = cursor.fetchone()
+    row = cursor.fetchone()
+
+    if not row:
+        return
+
+    bal, total = row
     vip = get_vip(total)
 
     await message.answer(
@@ -124,7 +136,12 @@ async def profile(message: Message):
 async def bonus(message: Message):
     cursor.execute("SELECT last_bonus FROM users WHERE user_id=?",
                    (message.from_user.id,))
-    last = cursor.fetchone()[0]
+    row = cursor.fetchone()
+
+    if not row:
+        return
+
+    last = row[0]
     now = int(time.time())
 
     if now - last < 86400:
@@ -192,7 +209,11 @@ async def universal_handler(message: Message):
         bet = int(text)
 
         cursor.execute("SELECT balance,total_bet FROM users WHERE user_id=?", (uid,))
-        bal,total = cursor.fetchone()
+        row = cursor.fetchone()
+        if not row:
+            return
+
+        bal, total = row
 
         if bet < 10 or bet > bal:
             await message.answer("❌ Stavka xato")
@@ -204,19 +225,19 @@ async def universal_handler(message: Message):
         win = random.random() < 0.30
 
         cursor.execute("UPDATE users SET total_bet=total_bet+? WHERE user_id=?",
-                       (bet,uid))
+                       (bet, uid))
 
         if win:
             cursor.execute("UPDATE users SET balance=balance+? WHERE user_id=?",
-                           (bet,uid))
-            text = f"🎉 YUTDINGIZ! +{bet}"
+                           (bet, uid))
+            result_text = f"🎉 YUTDINGIZ! +{bet}"
         else:
             cursor.execute("UPDATE users SET balance=balance-? WHERE user_id=?",
-                           (bet,uid))
-            text = f"😢 YUTQAZDINGIZ! -{bet}"
+                           (bet, uid))
+            result_text = f"😢 YUTQAZDINGIZ! -{bet}"
 
         conn.commit()
-        await msg.edit_text(text)
+        await msg.edit_text(result_text)
         return
 
     # WITHDRAW
@@ -234,7 +255,11 @@ async def universal_handler(message: Message):
             amount = withdraw_data[uid]["amount"]
 
             cursor.execute("SELECT balance FROM users WHERE user_id=?", (uid,))
-            bal = cursor.fetchone()[0]
+            row = cursor.fetchone()
+            if not row:
+                return
+
+            bal = row[0]
 
             if amount > bal:
                 await message.answer("❌ Balans yetarli emas!")
@@ -242,9 +267,9 @@ async def universal_handler(message: Message):
                 return
 
             cursor.execute("UPDATE users SET balance=balance-? WHERE user_id=?",
-                           (amount,uid))
+                           (amount, uid))
             cursor.execute("INSERT INTO withdraws (user_id,amount,card) VALUES (?,?,?)",
-                           (uid,amount,text))
+                           (uid, amount, text))
             conn.commit()
 
             withdraw_data.pop(uid)
