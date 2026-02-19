@@ -10,8 +10,8 @@ from aiogram.types import (
 from aiogram.filters import CommandStart
 
 # ================= CONFIG =================
-TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = os.getenv("ADMIN_ID")
+TOKEN = ("8506201183:AAH0mgPGmpDmYtHv_o4G6K7HPoOhrwxOP9s")
+ADMIN_ID = ("7973934849")
 
 if not TOKEN:
     raise ValueError("BOT_TOKEN topilmadi! Railway Variables ga qo‘shing.")
