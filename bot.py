@@ -1,118 +1,128 @@
 import asyncio
 import logging
+import sqlite3
 import random
 import string
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import LabeledPrice, PreCheckoutQuery, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
 # --- SOZLAMALAR ---
 API_TOKEN = '8066717720:AAEe3NoBcug1rTFT428HEBmJriwiutyWtr8'
 ADMIN_ID = 8537782289
-
-user_data = {}
+CLICK_TOKEN = 'SIZNING_CLICK_TOKENINGIZ' # BotFather-dan olingan token
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
+
+# --- MA'LUMOTLAR BAZASI (SQLite) ---
+db = sqlite3.connect("bot_users.db")
+cursor = db.cursor()
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY,
+        balance INTEGER DEFAULT 0,
+        total_in INTEGER DEFAULT 0,
+        api_key TEXT
+    )
+""")
+db.commit()
+
+class PaymentState(StatesGroup):
+    waiting_for_amount = State()
 
 # --- YORDAMCHI FUNKSIYALAR ---
-def get_api_key(user_id):
-    if user_id not in user_data:
-        user_data[user_id] = {'key': ''.join(random.choices(string.ascii_lowercase + string.digits, k=32))}
-    return user_data[user_id]['key']
+def get_user(user_id):
+    cursor.execute("SELECT balance, total_in, api_key FROM users WHERE id = ?", (user_id,))
+    res = cursor.fetchone()
+    if not res:
+        key = ''.join(random.choices(string.ascii_lowercase + string.digits, k=32))
+        cursor.execute("INSERT INTO users VALUES (?, 0, 0, ?)", (user_id, key))
+        db.commit()
+        return (0, 0, key)
+    return res
 
-# --- KLAVIATURALAR ---
+# --- ASOSIY MENYU ---
 def main_menu():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🛍 Xizmatlar"), KeyboardButton(text="📲 Nomer olish")],
         [KeyboardButton(text="🛒 Buyurtmalarim"), KeyboardButton(text="👥 Pul ishlash")],
         [KeyboardButton(text="💰 Hisobim"), KeyboardButton(text="💰 Hisob To'ldirish")],
-        [KeyboardButton(text="📩 Murojaat"), KeyboardButton(text="☎️ Qo'llab-quvvatlash")],
-        [KeyboardButton(text="🤝 Hamkorlik")]
+        [KeyboardButton(text="📩 Murojaat"), KeyboardButton(text="🤝 Hamkorlik")]
     ], resize_keyboard=True)
 
-# --- 1-RASM: START ---
+# --- START ---
 @dp.message(Command("start"))
-async def start_command(message: types.Message):
-    text = (
-        f"👋 Assalomu alaykum! {message.from_user.first_name}\n\n"
-        f"🟦 @SaleSeenBot ga xush kelibsiz!\n\n"
-        f"📊 Ushbu bot orqali siz barcha platformalarga shuningdek\n"
-        f"🔵 Telegram, 🟣 Instagram, ⚫️ TikTok, 🔴 YouTube va boshqa tarmoqlarga "
-        f"sifatli va hamyonbop **NAKRUTKA** va Boshqa xizmatlardan foydalanishingiz mumkin 🔵\n\n"
-        f"🕹 Bot qo'llanmasi: /qollanma"
-    )
+async def start_cmd(message: types.Message):
+    get_user(message.from_user.id) # Bazaga qo'shish
+    text = f"👋 Assalomu alaykum! {message.from_user.first_name}\n\n🟦 @SaleSeenBot ga xush kelibsiz!"
     await message.answer(text, reply_markup=main_menu())
 
-# --- 8-RASM: MUROJAAT ---
-@dp.message(F.text == "📩 Murojaat")
-async def murojaat(message: types.Message):
-    text = "⭐ Bizga savollaringiz bormi?\n\n📄 Murojaat matnini yozib yuboring."
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Orqaga", callback_data="home")]])
-    await message.answer(text, reply_markup=kb)
-
-# --- 11-12-RASMLAR: SMM PANEL API ---
-@dp.callback_query(F.data == "smm_api")
-async def smm_api_handler(callback: types.CallbackQuery):
+# --- HISOBIM (7-RASM) ---
+@dp.message(F.text == "💰 Hisobim")
+async def my_account(message: types.Message):
+    balance, total_in, _ = get_user(message.from_user.id)
     text = (
-        "🔥 SMM Panel API - tizimi\n\n"
-        "📋 Ushbu bo'lim orqali siz botimizning SMM xizmatlarini "
-        "o'z botingizga yoki saytingizga API orqali ulashingiz mumkin.\n\n"
-        "🌐 API URL: `https://saleseen.uz/api/v2`"
+        "🏰 Kabinetingizga xush kelibsiz.\n\n"
+        f"🆔 ID raqam: {message.from_user.id}\n"
+        f"💵 Hisobingiz: {balance:,} so'm\n"
+        f"✅ Kiritgan pullaringiz: {total_in:,} so'm"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔑 API Kalit", callback_data="get_key")],
-        [InlineKeyboardButton(text="💼 Qo'llanmalar", url="https://saleseen.uz/api")],
-        [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_ham")]
+        [InlineKeyboardButton(text="💰 Hisob To'ldirish", callback_data="p4")]
     ])
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await message.answer(text, reply_markup=kb)
 
-# --- 14-15-RASMLAR: TG NOMER API ---
-@dp.callback_query(F.data == "num_api")
-async def num_api(callback: types.CallbackQuery):
-    text = "☎️ Nomer API - tizimi\n\n📋 Ushbu tizim orqali siz Tayyor Akkauntlarga API olishingiz mumkin"
+# --- CLICK TO'LOV BOSHQARUVI ---
+@dp.message(F.text == "💰 Hisob To'ldirish")
+async def pay_init(message: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔑 API Kalit", callback_data="get_key")],
-        [InlineKeyboardButton(text="💼 Qo'llanmalar", callback_data="guide")],
-        [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_ham")]
+        [InlineKeyboardButton(text="🔵 CLICK Up [ Avto ]", callback_data="p4")]
     ])
-    await callback.message.edit_text(text, reply_markup=kb)
+    await message.answer("💰 To'lov tizimini tanlang:", reply_markup=kb)
 
-# --- API KEY KO'RSATISH VA YANGILASH ---
-@dp.callback_query(F.data == "get_key")
-async def show_key(callback: types.CallbackQuery):
-    key = get_api_key(callback.from_user.id)
-    text = f"Api urllar va dokumentlar 💼 Qo'llanmalar bo'limida.\n\n📋 Sizning API kalitingiz 👇:\n\n`{key}`"
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="♻️ API kalitni yangilash", callback_data="new_key")],
-        [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_ham")]
-    ])
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+@dp.callback_query(F.data == "p4")
+async def click_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("💸 To'lov summasini kiriting (faqat raqam):")
+    await state.set_state(PaymentState.waiting_for_amount)
 
-@dp.callback_query(F.data == "new_key")
-async def update_key(callback: types.CallbackQuery):
-    user_data[callback.from_user.id]['key'] = ''.join(random.choices(string.ascii_lowercase + string.digits, k=32))
-    await callback.answer("✅ API kalit yangilandi!")
-    await show_key(callback)
-
-# --- HAMKORLIK ---
-@dp.callback_query(F.data == "back_ham")
-@dp.message(F.text == "🤝 Hamkorlik")
-async def hamkorlik_main(message: types.Message | types.CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔥 SMM Panel API", callback_data="smm_api")],
-        [InlineKeyboardButton(text="☎️ TG Nomer API", callback_data="num_api")],
-        [InlineKeyboardButton(text="🤖 SMM Bot Yaratish", url="https://t.me/SaleContact")]
-    ])
-    text = "🤝 Hamkorlik dasturi. Biz bilan yangi daromad manbaingizni yarating.\n\nTushunmasangiz: @SaleContact murojaat qiling."
+@dp.message(PaymentState.waiting_for_amount)
+async def send_invoice(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        return await message.answer("❌ Faqat raqam yuboring!")
     
-    if isinstance(message, types.Message):
-        await message.answer(text, reply_markup=kb)
-    else:
-        await message.edit_text(text, reply_markup=kb)
+    amount = int(message.text)
+    await state.clear()
+    
+    await message.answer_invoice(
+        title="Balansni to'ldirish",
+        description=f"Hisobga {amount:,} so'm qo'shish",
+        provider_token=CLICK_TOKEN,
+        currency="UZS",
+        prices=[LabeledPrice(label="To'lov", amount=amount * 100)],
+        payload=f"topup_{message.from_user.id}"
+    )
 
-# --- ASOSIY ISHGA TUSHIRISH ---
+@dp.pre_checkout_query()
+async def checkout_check(query: PreCheckoutQuery):
+    await query.answer(ok=True)
+
+@dp.message(F.successful_payment)
+async def pay_done(message: types.Message):
+    amount = message.successful_payment.total_amount // 100
+    user_id = message.from_user.id
+    
+    # BAZANI YANGILASH
+    cursor.execute("UPDATE users SET balance = balance + ?, total_in = total_in + ? WHERE id = ?", (amount, amount, user_id))
+    db.commit()
+    
+    await message.answer(f"✅ Tabriklaymiz! Hisobingizga {amount:,} so'm qo'shildi.")
+
+# --- BOTNI ISHGA TUSHIRISH ---
 async def main():
     await dp.start_polling(bot)
 
