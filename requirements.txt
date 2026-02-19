@@ -1,1 +1,4 @@
-pip install aiogram==2.25.1
+requests
+pyTelegramBotAPI
+flask
+gunicorn
