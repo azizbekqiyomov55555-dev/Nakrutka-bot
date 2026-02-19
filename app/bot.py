@@ -1,7 +1,7 @@
 import asyncio
-from app.main import main
+
+async def main():
+    print("Bot ishga tushdi")
 
 if __name__ == "__main__":
     asyncio.run(main())
-def main():
-    print("Bot ishga tushdi")
