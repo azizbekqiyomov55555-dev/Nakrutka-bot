@@ -11,7 +11,8 @@ from aiogram.enums import ParseMode
 
 # --- SOZLAMALAR ---
 API_TOKEN = '8066717720:AAEe3NoBcug1rTFT428HEBmJriwiutyWtr8'
-ADMIN_ID = 8537782289 # Siz bergan yangi ID
+ADMIN_ID = 8537782289 
+ADMIN_USERNAME = "@Azizku_2008" # Siz bergan admin manzili
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -57,97 +58,83 @@ async def start_cmd(message: types.Message):
         if not user:
             conn.execute("INSERT INTO users (id, api_key) VALUES (?, ?)", (user_id, secrets.token_hex(16)))
     
-    welcome_text = (
-        f"👋 <b>Assalomu alaykum! {message.from_user.first_name}</b>\n\n"
-        f"💙 @SaleSeenBot ga xush kelibsiz!\n\n"
-        f"💻 Ushbu bot orqali siz barcha platformalarga nuktka xizmatlarini olishingiz mumkin."
-    )
-    await message.answer(welcome_text, reply_markup=main_menu())
+    await message.answer(f"👋 Assalomu alaykum! {message.from_user.first_name}\n\n🤖 @SaleSeenBot ga xush kelibsiz!", reply_markup=main_menu())
 
-# --- NOMER OLISH BO'LIMI ---
+# --- NOMER OLISH ---
 @dp.message(F.text == "📲 Nomer olish")
 async def nomer_olish_start(message: types.Message):
     await message.answer("👇 Kerakli tarmoqni tanlang.", reply_markup=nomer_menu())
 
-# --- TELEGRAM AKAUNTLAR (OXIRGI RASMGA MOS) ---
+# --- TELEGRAM AKAUNTLAR (1-SAHIFA) ---
 @dp.message(F.text == "📞 Telegram Akauntlar")
-async def tg_akauntlar(message: types.Message):
+@dp.callback_query(F.data == "tg_page_1")
+async def tg_akauntlar_p1(event):
     builder = InlineKeyboardBuilder()
-    # Davlatlar ro'yxati (Rasmga mos)
-    davlatlar = [
-        ("Bangladesh 🇧🇩 - 8958", "buy_8958"), ("Hindiston 🇮🇳 - 11197", "buy_11197"),
-        ("Keniya 🇰🇪 - 11197", "buy_11197k"), ("Kolumbiya 🇨🇴 - 12317", "buy_12317"),
-        ("Azerbaijan 🇦🇿 - 13437", "buy_13437"), ("Dominikana 🇩🇴 - 13437", "buy_13437d"),
-        ("Shri Lanka 🇱🇰 - 14556", "buy_14556"), ("Marokash 🇲🇦 - 14556", "buy_14556m"),
-        ("Tanzaniya 🇹🇿 - 14556", "buy_14556t"), ("Zambiya 🇿🇲 - 14556", "buy_14556z")
+    p1_data = [
+        ("Bangladesh 🇧🇩 - 8958", "buy"), ("Hindiston 🇮🇳 - 11197", "buy"),
+        ("Keniya 🇰🇪 - 11197", "buy"), ("Kolumbiya 🇨🇴 - 12317", "buy"),
+        ("Azerbaijan 🇦🇿 - 13437", "buy"), ("Dominikana 🇩🇴 - 13437", "buy"),
+        ("Shri Lanka 🇱🇰 - 14556", "buy"), ("Marokash 🇲🇦 - 14556", "buy"),
+        ("Tanzaniya 🇹🇿 - 14556", "buy"), ("Zambiya 🇿🇲 - 14556", "buy"),
+        ("Kongo 🇨🇬 - 14556", "buy"), ("Kosta-Rika 🇨🇷 - 14556", "buy"),
+        ("Misr 🇪🇬 - 14556", "buy"), ("Madagaskar 🇲🇬 - 15676", "buy"),
+        ("Rwanda 🇷🇼 - 15676", "buy"), ("Jazoir 🇩🇿 - 15676", "buy")
     ]
+    for text, cb in p1_data: builder.add(types.InlineKeyboardButton(text=text, callback_data=cb))
+    builder.adjust(2)
     
-    for text, callback in davlatlar:
-        builder.add(types.InlineKeyboardButton(text=text, callback_data=callback))
-    
-    builder.adjust(2) # 2 tadan qilib joylash
-    
-    # Pastki boshqaruv tugmalari
-    builder.row(types.InlineKeyboardButton(text="🥷 Admin orqali nomer olish", url="https://t.me/SaleContact"))
+    builder.row(types.InlineKeyboardButton(text="🥷 Admin orqali nomer olish", url=f"https://t.me/{ADMIN_USERNAME.replace('@','') }"))
     builder.row(
         types.InlineKeyboardButton(text="1/9", callback_data="none"),
-        types.InlineKeyboardButton(text="⏩ Keyingi", callback_data="next_page")
+        types.InlineKeyboardButton(text="⏩ Keyingi", callback_data="tg_page_2")
     )
     
-    text = (
-        "📞 <b>Ushbu davlat raqamlari faqat Telegram akaunt ochish uchun beriladi.</b>\n\n"
-        "🛍 <b>Topilgan davlatlar ro'yxati:</b>"
-    )
-    await message.answer(text, reply_markup=builder.as_markup())
+    text = "📞 <b>Ushbu davlat raqamlari faqat Telegram akaunt ochish uchun beriladi.</b>\n\n🛍 <b>Topilgan davlatlar ro'yxati:</b>"
+    
+    if isinstance(event, types.Message):
+        await event.answer(text, reply_markup=builder.as_markup())
+    else:
+        await event.message.edit_text(text, reply_markup=builder.as_markup())
 
+# --- TELEGRAM AKAUNTLAR (2-SAHIFA - YANGI) ---
+@dp.callback_query(F.data == "tg_page_2")
+async def tg_akauntlar_p2(call: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    p2_data = [
+        ("Puerto-Riko 🇵🇷 - 15676", "buy"), ("Argentina 🇦🇷 - 15676", "buy"),
+        ("AQSh 🇺🇸 - 16796", "buy"), ("Afg'oniston 🇦🇫 - 16796", "buy"),
+        ("Gaiti 🇭🇹 - 16796", "buy"), ("Yamayka 🇯🇲 - 16796", "buy"),
+        ("Barbuda 🇦🇬 - 17916", "buy"), ("Trinidad 🇹🇹 - 17916", "buy"),
+        ("Nikaragua 🇳🇮 - 17916", "buy"), ("Mavritaniya 🇲🇷 - 17916", "buy"),
+        ("Venesuela 🇻🇪 - 17916", "buy"), ("O'zbekiston 🇺🇿 - 17916", "buy"),
+        ("Surinam 🇸🇷 - 19035", "buy"), ("Serbiya 🇷🇸 - 19035", "buy"),
+        ("Braziliya 🇧🇷 - 19035", "buy"), ("Kuba 🇨🇺 - 19035", "buy")
+    ]
+    for text, cb in p2_data: builder.add(types.InlineKeyboardButton(text=text, callback_data=cb))
+    builder.adjust(2)
+    
+    builder.row(types.InlineKeyboardButton(text="🥷 Admin orqali nomer olish", url=f"https://t.me/{ADMIN_USERNAME.replace('@','') }"))
+    builder.row(
+        types.InlineKeyboardButton(text="⏪ Oldingi", callback_data="tg_page_1"),
+        types.InlineKeyboardButton(text="2/9", callback_data="none"),
+        types.InlineKeyboardButton(text="⏩ Keyingi", callback_data="tg_page_3")
+    )
+    
+    await call.message.edit_text("📞 <b>Ushbu davlat raqamlari faqat Telegram akaunt ochish uchun beriladi.</b>\n\n🛍 <b>Topilgan davlatlar ro'yxati:</b>", reply_markup=builder.as_markup())
+
+# --- QOLGAN FUNKSIYALAR ---
 @dp.message(F.text == "Bosh sahifa ⬆️")
 async def back_to_home(message: types.Message):
     await message.answer("Asosiy menyuga qaytdingiz.", reply_markup=main_menu())
 
-# --- HAMKORLIK BO'LIMI ---
 @dp.message(F.text == "🤝 Hamkorlik")
 async def collab_menu(message: types.Message):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔥 SMM Panel API", callback_data="sect_smm"))
     builder.row(types.InlineKeyboardButton(text="☎️ TG Nomer API", callback_data="sect_nomer"))
-    builder.row(types.InlineKeyboardButton(text="🤖 SMM Bot Yaratish", callback_data="sect_bot"))
     builder.adjust(1)
-    
-    text = (
-        "🤝 <b>Hamkorlik dasturi. Biz bilan yangi daromad manbaingizni yarating.</b>\n\n"
-        "<i>Tushunmasangiz:</i> @SaleContact murojaat qilishingiz mumkin."
-    )
-    await message.answer(text, reply_markup=builder.as_markup())
+    await message.answer("🤝 <b>Hamkorlik dasturi...</b>", reply_markup=builder.as_markup())
 
-# --- API HANDLERLARI ---
-@dp.callback_query(F.data.in_({"sect_smm", "sect_nomer"}))
-async def section_handler(call: types.CallbackQuery):
-    prefix = "smm" if call.data == "sect_smm" else "num"
-    title = "🔥 SMM Panel - tizimi" if prefix == "smm" else "☎️ Nomer API - tizimi"
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(text="🔑 API Kalit", callback_data=f"api_view_{prefix}"),
-        types.InlineKeyboardButton(text="💼 Qo'llanmalar", callback_data=f"api_guide_{prefix}")
-    )
-    builder.row(types.InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_collab"))
-    
-    await call.message.edit_text(f"<b>{title}</b>\n\n📋 Tizim orqali API buyurtma qilishingiz mumkin.", reply_markup=builder.as_markup())
-
-@dp.callback_query(F.data.startswith("api_view_"))
-async def api_display(call: types.CallbackQuery):
-    user_id = call.from_user.id
-    with get_db_connection() as conn:
-        api_key = conn.execute("SELECT api_key FROM users WHERE id = ?", (user_id,)).fetchone()['api_key']
-
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="♻️ API kalitni yangilash", callback_data=f"api_refresh_{call.data.split('_')[-1]}"))
-    builder.row(types.InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_collab"))
-    
-    text = f"📌 <b>Sizning API Manzilingiz</b>:\n<code>https://saleseen.uz/api/v2</code>\n\n📋 <b>API kalitingiz</b>:\n<code>{api_key}</code>"
-    await call.message.edit_text(text, reply_markup=builder.as_markup())
-
-# --- ISHGA TUSHIRISH ---
 async def main():
     await dp.start_polling(bot)
 
