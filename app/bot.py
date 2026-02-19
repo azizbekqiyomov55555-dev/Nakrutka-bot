@@ -3,26 +3,29 @@ import random
 import sqlite3
 import time
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import (
+    Message, ReplyKeyboardMarkup, KeyboardButton,
+    InlineKeyboardMarkup, InlineKeyboardButton
+)
 from aiogram.filters import CommandStart
 
-TOKEN = "8318931210:AAFJLBgfF2_reXxXWpWjb8NjsuveWxYIVjY"
-ADMIN_ID = 8537782289
+TOKEN = "BOT_TOKENING"
+ADMIN_ID = 123456789
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# ===== DATABASE =====
 conn = sqlite3.connect("casino.db")
 cursor = conn.cursor()
 
+# ================= DATABASE =================
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     balance INTEGER DEFAULT 1000,
     last_bonus INTEGER DEFAULT 0,
-    referred_by INTEGER DEFAULT NULL,
-    banned INTEGER DEFAULT 0
+    referred_by INTEGER,
+    total_bet INTEGER DEFAULT 0
 )
 """)
 
@@ -31,22 +34,40 @@ CREATE TABLE IF NOT EXISTS withdraws (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     amount INTEGER,
-    status TEXT DEFAULT 'pending'
+    card TEXT
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS promocodes (
+    code TEXT PRIMARY KEY,
+    reward INTEGER
 )
 """)
 
 conn.commit()
 
-# ===== MENU =====
+cursor.execute("INSERT OR IGNORE INTO promocodes VALUES ('BONUS100', 100)")
+conn.commit()
+
+# ================= VIP =================
+def get_vip(total_bet):
+    if total_bet >= 100000:
+        return "💎 VIP 3"
+    elif total_bet >= 50000:
+        return "🥇 VIP 2"
+    elif total_bet >= 10000:
+        return "🥈 VIP 1"
+    else:
+        return "👤 Oddiy"
+
+# ================= MENU =================
 def main_menu(user_id):
     keyboard = [
-        [KeyboardButton(text="🎮 Coin Flip"), KeyboardButton(text="🎲 Dice")],
-        [KeyboardButton(text="🔢 High/Low"), KeyboardButton(text="🎯 Guess 1-10")],
-        [KeyboardButton(text="🎰 Slot"), KeyboardButton(text="🪙 Double")],
-        [KeyboardButton(text="🎡 Wheel"), KeyboardButton(text="💣 Mines")],
-        [KeyboardButton(text="🐎 Horse"), KeyboardButton(text="🎁 Bonus")],
-        [KeyboardButton(text="🏆 Top"), KeyboardButton(text="💸 Withdraw")],
-        [KeyboardButton(text="👤 Profil")]
+        [KeyboardButton(text="🎮 O‘yinlar")],
+        [KeyboardButton(text="🎁 Bonus"), KeyboardButton(text="🎟 Promo kod")],
+        [KeyboardButton(text="👥 Referal"), KeyboardButton(text="👤 Profil")],
+        [KeyboardButton(text="💸 Withdraw")]
     ]
 
     if user_id == ADMIN_ID:
@@ -54,190 +75,252 @@ def main_menu(user_id):
 
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
-# ===== GAME SETTINGS =====
-games = {
-    "🎮 Coin Flip": 0.48,
-    "🎲 Dice": 0.50,
-    "🔢 High/Low": 0.48,
-    "🎯 Guess 1-10": 0.45,
-    "🎰 Slot": 0.30,
-    "🪙 Double": 0.45,
-    "🎡 Wheel": 0.40,
-    "💣 Mines": 0.35,
-    "🐎 Horse": 0.38,
-}
+games_list = [
+    "🎲 Dice","🪙 Coin Flip","🎯 Lucky Shot",
+    "🎰 Slot","⚡ Crash","🎴 Card",
+    "🎱 8 Ball","🎳 Bowling","🎮 Mini Game","🎯 Sniper"
+]
 
-game_state = {}
-withdraw_state = {}
+withdraw_data = {}
+admin_reply_user = {}
 
-# ===== START =====
-@dp.message(CommandStart())
-async def start_handler(message: Message):
-    cursor.execute("SELECT banned FROM users WHERE user_id=?", (message.from_user.id,))
-    banned = cursor.fetchone()
+# ================= START =================
+@dp.message(CommandStart(deep_link=True))
+async def start(message: Message, command: CommandStart):
+    ref_id = command.args
 
-    if banned and banned[0] == 1:
-        await message.answer("🚫 Siz bloklangansiz.")
-        return
+    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)",
+                   (message.from_user.id,))
 
-    args = message.text.split()
+    if ref_id and ref_id.isdigit():
+        ref_id = int(ref_id)
+        if ref_id != message.from_user.id:
+            cursor.execute("UPDATE users SET referred_by=? WHERE user_id=? AND referred_by IS NULL",
+                           (ref_id, message.from_user.id))
+            cursor.execute("UPDATE users SET balance=balance+50 WHERE user_id=?",
+                           (ref_id,))
+    conn.commit()
 
-    cursor.execute("SELECT * FROM users WHERE user_id=?", (message.from_user.id,))
-    user = cursor.fetchone()
+    await message.answer("🎰 Casino Bot", reply_markup=main_menu(message.from_user.id))
 
-    if not user:
-        referred_by = None
-        if len(args) > 1 and args[1].isdigit():
-            referred_by = int(args[1])
-
-        cursor.execute(
-            "INSERT INTO users (user_id, referred_by) VALUES (?,?)",
-            (message.from_user.id, referred_by)
-        )
-        conn.commit()
-
-        if referred_by and referred_by != message.from_user.id:
-            cursor.execute("UPDATE users SET balance = balance + 500 WHERE user_id=?", (referred_by,))
-            conn.commit()
-
-    await message.answer("🎰 Mega Casino Botga xush kelibsiz!", reply_markup=main_menu(message.from_user.id))
-
-# ===== PROFIL =====
+# ================= PROFIL =================
 @dp.message(F.text == "👤 Profil")
-async def profile_handler(message: Message):
-    cursor.execute("SELECT balance FROM users WHERE user_id=?", (message.from_user.id,))
-    bal = cursor.fetchone()[0]
-
-    bot_info = await bot.get_me()
-    ref_link = f"https://t.me/{bot_info.username}?start={message.from_user.id}"
+async def profile(message: Message):
+    cursor.execute("SELECT balance,total_bet FROM users WHERE user_id=?",
+                   (message.from_user.id,))
+    bal,total = cursor.fetchone()
+    vip = get_vip(total)
 
     await message.answer(
-        f"👤 ID: {message.from_user.id}\n"
-        f"💰 Balans: {bal} coin\n\n"
-        f"👥 Referral link:\n{ref_link}"
+        f"💰 Balans: {bal} coin\n"
+        f"🎯 Umumiy tikilgan: {total}\n"
+        f"{vip}"
     )
 
-# ===== TOP =====
-@dp.message(F.text == "🏆 Top")
-async def top_handler(message: Message):
-    cursor.execute("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 10")
-    users = cursor.fetchall()
-
-    text = "🏆 TOP 10:\n\n"
-    for i, user in enumerate(users, 1):
-        text += f"{i}. {user[0]} — {user[1]} coin\n"
-
-    await message.answer(text)
-
-# ===== BONUS =====
+# ================= BONUS =================
 @dp.message(F.text == "🎁 Bonus")
-async def bonus_handler(message: Message):
-    cursor.execute("SELECT last_bonus FROM users WHERE user_id=?", (message.from_user.id,))
-    last_bonus = cursor.fetchone()[0]
+async def bonus(message: Message):
+    cursor.execute("SELECT last_bonus FROM users WHERE user_id=?",
+                   (message.from_user.id,))
+    last = cursor.fetchone()[0]
     now = int(time.time())
 
-    if now - last_bonus < 86400:
+    if now - last < 86400:
         await message.answer("⏳ 24 soatda 1 marta!")
         return
 
-    cursor.execute("UPDATE users SET balance = balance + 1000, last_bonus=? WHERE user_id=?",
+    cursor.execute("UPDATE users SET balance=balance+100, last_bonus=? WHERE user_id=?",
                    (now, message.from_user.id))
     conn.commit()
 
-    await message.answer("🎁 +1000 coin!")
+    await message.answer("🎁 +100 coin qo‘shildi!")
 
-# ===== GAME START =====
-@dp.message(F.text.in_(games.keys()))
+# ================= PROMO =================
+@dp.message(F.text == "🎟 Promo kod")
+async def promo_start(message: Message):
+    await message.answer("Promo kodni kiriting:")
+
+@dp.message()
+async def promo_check(message: Message):
+    code = message.text.upper()
+    cursor.execute("SELECT reward FROM promocodes WHERE code=?", (code,))
+    row = cursor.fetchone()
+
+    if row:
+        reward = row[0]
+        cursor.execute("UPDATE users SET balance=balance+? WHERE user_id=?",
+                       (reward, message.from_user.id))
+        cursor.execute("DELETE FROM promocodes WHERE code=?", (code,))
+        conn.commit()
+        await message.answer(f"🎁 {reward} coin qo‘shildi!")
+    else:
+        return
+
+# ================= REFERAL =================
+@dp.message(F.text == "👥 Referal")
+async def referal(message: Message):
+    link = f"https://t.me/{(await bot.get_me()).username}?start={message.from_user.id}"
+    await message.answer(f"👥 Taklif havola:\n\n{link}\n\nHar referal 50 coin!")
+
+# ================= O‘YIN =================
+@dp.message(F.text == "🎮 O‘yinlar")
+async def games(message: Message):
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=g)] for g in games_list] + [[KeyboardButton(text="🔙 Orqaga")]],
+        resize_keyboard=True
+    )
+    await message.answer("O‘yinni tanlang:", reply_markup=kb)
+
+@dp.message(F.text.in_(games_list))
 async def game_start(message: Message):
-    game_state[message.from_user.id] = message.text
-    await message.answer("💵 Stavka kiriting:")
+    await message.answer("💵 Stavka kiriting (min 10 coin):")
 
-# ===== WITHDRAW =====
+@dp.message(F.text.regexp(r"^\d+$"))
+async def play(message: Message):
+    user_id = message.from_user.id
+    bet = int(message.text)
+
+    if bet < 10:
+        await message.answer("❌ Minimal stavka 10")
+        return
+
+    cursor.execute("SELECT balance,total_bet FROM users WHERE user_id=?", (user_id,))
+    bal,total = cursor.fetchone()
+
+    if bet > bal:
+        await message.answer("❌ Balans yetarli emas!")
+        return
+
+    # Fake kazino animatsiya
+    msg = await message.answer("🎰 Aylanmoqda...")
+    await asyncio.sleep(2)
+
+    win = random.random() < 0.30
+
+    cursor.execute("UPDATE users SET total_bet=total_bet+? WHERE user_id=?",
+                   (bet,user_id))
+
+    if win:
+        cursor.execute("UPDATE users SET balance=balance+? WHERE user_id=?",
+                       (bet,user_id))
+        text = f"🎉 YUTDINGIZ! +{bet}"
+    else:
+        cursor.execute("UPDATE users SET balance=balance-? WHERE user_id=?",
+                       (bet,user_id))
+        text = f"😢 YUTQAZDINGIZ! -{bet}"
+
+    conn.commit()
+    await msg.edit_text(text)
+
+# ================= WITHDRAW =================
 @dp.message(F.text == "💸 Withdraw")
 async def withdraw_start(message: Message):
-    withdraw_state[message.from_user.id] = True
-    await message.answer("💰 Qancha coin?")
+    withdraw_data[message.from_user.id] = {"step": "amount"}
+    await message.answer("💰 Qancha coin? (1 coin = 1 so‘m)")
 
-# ===== ADMIN PANEL =====
+@dp.message()
+async def withdraw_process(message: Message):
+    uid = message.from_user.id
+
+    if uid not in withdraw_data:
+        return
+
+    step = withdraw_data[uid]["step"]
+
+    if step == "amount":
+        if not message.text.isdigit():
+            return
+        withdraw_data[uid]["amount"] = int(message.text)
+        withdraw_data[uid]["step"] = "card"
+        await message.answer("💳 Karta raqami:")
+        return
+
+    if step == "card":
+        withdraw_data[uid]["card"] = message.text
+        withdraw_data[uid]["step"] = "confirm"
+
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📤 Yuborish", callback_data="send_withdraw")]
+            ]
+        )
+        await message.answer("Tasdiqlaysizmi?", reply_markup=kb)
+
+@dp.callback_query(F.data == "send_withdraw")
+async def confirm_withdraw(callback):
+    uid = callback.from_user.id
+    data = withdraw_data[uid]
+
+    amount = data["amount"]
+    card = data["card"]
+
+    cursor.execute("SELECT balance FROM users WHERE user_id=?", (uid,))
+    bal = cursor.fetchone()[0]
+
+    if amount > bal:
+        await callback.message.answer("❌ Balans yetarli emas!")
+        return
+
+    cursor.execute("UPDATE users SET balance=balance-? WHERE user_id=?",
+                   (amount,uid))
+    cursor.execute("INSERT INTO withdraws (user_id,amount,card) VALUES (?,?,?)",
+                   (uid,amount,card))
+    conn.commit()
+
+    withdraw_data.pop(uid)
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✉ Foydalanuvchiga xabar",
+                                  callback_data=f"reply_{uid}")]
+        ]
+    )
+
+    await bot.send_message(
+        ADMIN_ID,
+        f"💸 Withdraw\nUser: {uid}\nSumma: {amount}\nKarta: {card}",
+        reply_markup=kb
+    )
+
+    await callback.message.answer("✅ So‘rov yuborildi!")
+
+# ================= ADMIN =================
 @dp.message(F.text == "👑 Admin Panel")
 async def admin_panel(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📊 Statistika")],
+            [KeyboardButton(text="💰 Bot foydasi")],
+            [KeyboardButton(text="🔙 Orqaga")]
+        ],
+        resize_keyboard=True
+    )
+    await message.answer("👑 Admin Panel", reply_markup=kb)
+
+@dp.message(F.text == "📊 Statistika")
+async def stats(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
 
     cursor.execute("SELECT COUNT(*) FROM users")
     users = cursor.fetchone()[0]
 
-    cursor.execute("SELECT SUM(balance) FROM users")
-    total_balance = cursor.fetchone()[0] or 0
+    await message.answer(f"👥 Foydalanuvchilar: {users}")
 
-    cursor.execute("SELECT COUNT(*) FROM withdraws WHERE status='pending'")
-    pending = cursor.fetchone()[0]
-
-    await message.answer(
-        f"👑 ADMIN PANEL\n\n"
-        f"👥 Users: {users}\n"
-        f"💰 Total Balance: {total_balance}\n"
-        f"💸 Pending Withdraw: {pending}"
-    )
-
-# ===== MAIN HANDLER =====
-@dp.message()
-async def universal_handler(message: Message):
-    user_id = message.from_user.id
-
-    if withdraw_state.get(user_id):
-        if not message.text.isdigit():
-            return
-
-        amount = int(message.text)
-
-        cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-        bal = cursor.fetchone()[0]
-
-        if amount <= 0 or amount > bal:
-            await message.answer("❌ Noto‘g‘ri summa!")
-            return
-
-        cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, user_id))
-        cursor.execute("INSERT INTO withdraws (user_id, amount) VALUES (?,?)", (user_id, amount))
-        conn.commit()
-
-        withdraw_state[user_id] = False
-
-        await message.answer("✅ So‘rov yuborildi.")
-        await bot.send_message(ADMIN_ID, f"💸 Withdraw\nUser: {user_id}\nAmount: {amount}")
+@dp.message(F.text == "💰 Bot foydasi")
+async def profit(message: Message):
+    if message.from_user.id != ADMIN_ID:
         return
 
-    if not message.text.isdigit():
-        return
+    cursor.execute("SELECT SUM(amount) FROM withdraws")
+    total = cursor.fetchone()[0] or 0
 
-    bet = int(message.text)
+    await message.answer(f"💰 Umumiy chiqarilgan: {total} so‘m")
 
-    cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-    bal = cursor.fetchone()[0]
-
-    if bet <= 0 or bet > bal:
-        await message.answer("❌ Noto‘g‘ri stavka!")
-        return
-
-    game = game_state.get(user_id)
-    if not game:
-        return
-
-    win = random.random() < games[game]
-
-    if win:
-        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (bet, user_id))
-        text = f"🎉 YUTDINGIZ +{bet}"
-    else:
-        cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (bet, user_id))
-        text = f"😢 YUTQAZDINGIZ -{bet}"
-
-    conn.commit()
-    game_state[user_id] = None
-    await message.answer(text)
-
-# ===== RUN =====
+# ================= RUN =================
 async def main():
     await dp.start_polling(bot)
 
