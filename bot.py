@@ -9,7 +9,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 # --- SOZLAMALAR ---
-API_TOKEN = 'SIZNING_BOT_TOKENINGIZ'
+API_TOKEN = '8066717720:AAEe3NoBcug1rTFT428HEBmJriwiutyWtr8'
 ADMIN_ID = 123456789 
 
 logging.basicConfig(level=logging.INFO)
