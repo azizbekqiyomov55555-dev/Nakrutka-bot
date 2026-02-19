@@ -1,7 +1,10 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 def main_menu():
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("🎮 Coin Flip"))
-    kb.add(KeyboardButton("👤 Profil"))
-    return kb
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🎮 Coin Flip")],
+            [KeyboardButton(text="👤 Profil")]
+        ],
+        resize_keyboard=True
+    )
