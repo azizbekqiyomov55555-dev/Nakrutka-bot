@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     balance INTEGER DEFAULT 1000,
     last_bonus INTEGER DEFAULT 0,
-    referred_by INTEGER DEFAULT NULL
+    referred_by INTEGER DEFAULT NULL,
+    banned INTEGER DEFAULT 0
 )
 """)
 
@@ -37,19 +38,21 @@ CREATE TABLE IF NOT EXISTS withdraws (
 conn.commit()
 
 # ===== MENU =====
-def main_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🎮 Coin Flip"), KeyboardButton(text="🎲 Dice")],
-            [KeyboardButton(text="🔢 High/Low"), KeyboardButton(text="🎯 Guess 1-10")],
-            [KeyboardButton(text="🎰 Slot"), KeyboardButton(text="🪙 Double")],
-            [KeyboardButton(text="🎡 Wheel"), KeyboardButton(text="💣 Mines")],
-            [KeyboardButton(text="🐎 Horse"), KeyboardButton(text="🎁 Bonus")],
-            [KeyboardButton(text="🏆 Top"), KeyboardButton(text="💸 Withdraw")],
-            [KeyboardButton(text="👤 Profil")]
-        ],
-        resize_keyboard=True
-    )
+def main_menu(user_id):
+    keyboard = [
+        [KeyboardButton(text="🎮 Coin Flip"), KeyboardButton(text="🎲 Dice")],
+        [KeyboardButton(text="🔢 High/Low"), KeyboardButton(text="🎯 Guess 1-10")],
+        [KeyboardButton(text="🎰 Slot"), KeyboardButton(text="🪙 Double")],
+        [KeyboardButton(text="🎡 Wheel"), KeyboardButton(text="💣 Mines")],
+        [KeyboardButton(text="🐎 Horse"), KeyboardButton(text="🎁 Bonus")],
+        [KeyboardButton(text="🏆 Top"), KeyboardButton(text="💸 Withdraw")],
+        [KeyboardButton(text="👤 Profil")]
+    ]
+
+    if user_id == ADMIN_ID:
+        keyboard.append([KeyboardButton(text="👑 Admin Panel")])
+
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 # ===== GAME SETTINGS =====
 games = {
@@ -70,6 +73,13 @@ withdraw_state = {}
 # ===== START =====
 @dp.message(CommandStart())
 async def start_handler(message: Message):
+    cursor.execute("SELECT banned FROM users WHERE user_id=?", (message.from_user.id,))
+    banned = cursor.fetchone()
+
+    if banned and banned[0] == 1:
+        await message.answer("🚫 Siz bloklangansiz.")
+        return
+
     args = message.text.split()
 
     cursor.execute("SELECT * FROM users WHERE user_id=?", (message.from_user.id,))
@@ -90,7 +100,7 @@ async def start_handler(message: Message):
             cursor.execute("UPDATE users SET balance = balance + 500 WHERE user_id=?", (referred_by,))
             conn.commit()
 
-    await message.answer("🎰 Mega Casino Botga xush kelibsiz!", reply_markup=main_menu())
+    await message.answer("🎰 Mega Casino Botga xush kelibsiz!", reply_markup=main_menu(message.from_user.id))
 
 # ===== PROFIL =====
 @dp.message(F.text == "👤 Profil")
@@ -127,33 +137,54 @@ async def bonus_handler(message: Message):
     now = int(time.time())
 
     if now - last_bonus < 86400:
-        await message.answer("⏳ Bonusni 24 soatda 1 marta olasiz!")
+        await message.answer("⏳ 24 soatda 1 marta!")
         return
 
     cursor.execute("UPDATE users SET balance = balance + 1000, last_bonus=? WHERE user_id=?",
                    (now, message.from_user.id))
     conn.commit()
 
-    await message.answer("🎁 +1000 coin bonus!")
+    await message.answer("🎁 +1000 coin!")
 
 # ===== GAME START =====
 @dp.message(F.text.in_(games.keys()))
 async def game_start(message: Message):
     game_state[message.from_user.id] = message.text
-    await message.answer("💵 Stavka miqdorini kiriting:")
+    await message.answer("💵 Stavka kiriting:")
 
-# ===== WITHDRAW START =====
+# ===== WITHDRAW =====
 @dp.message(F.text == "💸 Withdraw")
 async def withdraw_start(message: Message):
     withdraw_state[message.from_user.id] = True
-    await message.answer("💰 Qancha coin chiqarmoqchisiz?")
+    await message.answer("💰 Qancha coin?")
 
-# ===== UNIVERSAL HANDLER =====
+# ===== ADMIN PANEL =====
+@dp.message(F.text == "👑 Admin Panel")
+async def admin_panel(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT SUM(balance) FROM users")
+    total_balance = cursor.fetchone()[0] or 0
+
+    cursor.execute("SELECT COUNT(*) FROM withdraws WHERE status='pending'")
+    pending = cursor.fetchone()[0]
+
+    await message.answer(
+        f"👑 ADMIN PANEL\n\n"
+        f"👥 Users: {users}\n"
+        f"💰 Total Balance: {total_balance}\n"
+        f"💸 Pending Withdraw: {pending}"
+    )
+
+# ===== MAIN HANDLER =====
 @dp.message()
 async def universal_handler(message: Message):
     user_id = message.from_user.id
 
-    # Withdraw jarayoni
     if withdraw_state.get(user_id):
         if not message.text.isdigit():
             return
@@ -173,11 +204,10 @@ async def universal_handler(message: Message):
 
         withdraw_state[user_id] = False
 
-        await message.answer("✅ So‘rov yuborildi! Admin ko‘rib chiqadi.")
-        await bot.send_message(ADMIN_ID, f"💸 Withdraw:\nUser: {user_id}\nAmount: {amount}")
+        await message.answer("✅ So‘rov yuborildi.")
+        await bot.send_message(ADMIN_ID, f"💸 Withdraw\nUser: {user_id}\nAmount: {amount}")
         return
 
-    # O‘yin stavkasi
     if not message.text.isdigit():
         return
 
@@ -198,49 +228,14 @@ async def universal_handler(message: Message):
 
     if win:
         cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (bet, user_id))
-        text = f"🎉 YUTDINGIZ! +{bet}"
+        text = f"🎉 YUTDINGIZ +{bet}"
     else:
         cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (bet, user_id))
-        text = f"😢 YUTQAZDINGIZ! -{bet}"
+        text = f"😢 YUTQAZDINGIZ -{bet}"
 
     conn.commit()
     game_state[user_id] = None
     await message.answer(text)
-
-# ===== ADMIN =====
-@dp.message(F.text.startswith("/add"))
-async def admin_add(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    parts = message.text.split()
-    if len(parts) != 3:
-        await message.answer("Format: /add user_id amount")
-        return
-
-    uid = int(parts[1])
-    amount = int(parts[2])
-
-    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, uid))
-    conn.commit()
-    await message.answer("✅ Balans qo‘shildi!")
-
-@dp.message(F.text.startswith("/remove"))
-async def admin_remove(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    parts = message.text.split()
-    if len(parts) != 3:
-        await message.answer("Format: /remove user_id amount")
-        return
-
-    uid = int(parts[1])
-    amount = int(parts[2])
-
-    cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, uid))
-    conn.commit()
-    await message.answer("✅ Balans ayirildi!")
 
 # ===== RUN =====
 async def main():
