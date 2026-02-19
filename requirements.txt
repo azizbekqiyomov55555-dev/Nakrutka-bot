@@ -1,2 +1,2 @@
-aiogram
-aiosqlite
+pip install aiogram==2.25.1
+pip install requests
