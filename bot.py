@@ -1,131 +1,147 @@
-import asyncio
 import logging
 import sqlite3
-import random
-import string
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import LabeledPrice, PreCheckoutQuery, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+import requests
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
+from aiogram.utils import executor
 
-# --- SOZLAMALAR ---
+# --- 1. SOZLAMALAR ---
 API_TOKEN = '8066717720:AAEe3NoBcug1rTFT428HEBmJriwiutyWtr8'
-ADMIN_ID = 8537782289
-CLICK_TOKEN = 'SIZNING_CLICK_TOKENINGIZ' # BotFather-dan olingan token
+ADMIN_ID = 8537782289  # O'zingizning ID raqamingizni yozing
+PANEL_API_KEY = 'aee8149aa4fe37368499c64f63193153'
+PANEL_URL = 'https://saleseen.uz/api/v2'
+KARTA_RAQAM = "860006929870872"
 
-logging.basicConfig(level=logging.INFO)
+# Bot va Logging
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+dp = Dispatcher(bot)
+logging.basicConfig(level=logging.INFO)
 
-# --- MA'LUMOTLAR BAZASI (SQLite) ---
-db = sqlite3.connect("bot_users.db")
-cursor = db.cursor()
-cursor.execute("""
+# --- 2. MA'LUMOTLAR BAZASI (SQLite) ---
+def init_db():
+    conn = sqlite3.connect("bot_base.db")
+    cursor = conn.cursor()
+    cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY,
-        balance INTEGER DEFAULT 0,
-        total_in INTEGER DEFAULT 0,
-        api_key TEXT
+        user_id INTEGER PRIMARY KEY,
+        balance INTEGER DEFAULT 0
     )
-""")
-db.commit()
+    """)
+    conn.commit()
+    conn.close()
 
-class PaymentState(StatesGroup):
-    waiting_for_amount = State()
-
-# --- YORDAMCHI FUNKSIYALAR ---
-def get_user(user_id):
-    cursor.execute("SELECT balance, total_in, api_key FROM users WHERE id = ?", (user_id,))
+def get_balance(user_id):
+    conn = sqlite3.connect("bot_base.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
     res = cursor.fetchone()
-    if not res:
-        key = ''.join(random.choices(string.ascii_lowercase + string.digits, k=32))
-        cursor.execute("INSERT INTO users VALUES (?, 0, 0, ?)", (user_id, key))
-        db.commit()
-        return (0, 0, key)
-    return res
+    conn.close()
+    return res[0] if res else 0
 
-# --- ASOSIY MENYU ---
+def update_balance(user_id, amount):
+    conn = sqlite3.connect("bot_base.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, user_id))
+    conn.commit()
+    conn.close()
+
+# --- 3. KLAVIATURALAR ---
 def main_menu():
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🛍 Xizmatlar"), KeyboardButton(text="📲 Nomer olish")],
-        [KeyboardButton(text="🛒 Buyurtmalarim"), KeyboardButton(text="👥 Pul ishlash")],
-        [KeyboardButton(text="💰 Hisobim"), KeyboardButton(text="💰 Hisob To'ldirish")],
-        [KeyboardButton(text="📩 Murojaat"), KeyboardButton(text="🤝 Hamkorlik")]
-    ], resize_keyboard=True)
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("🚀 Buyurtma berish", callback_data="order_start"),
+        InlineKeyboardButton("💰 Balans", callback_data="check_balance"),
+        InlineKeyboardButton("💳 Hisobni to'ldirish", callback_data="fill_balance"),
+        InlineKeyboardButton("🆘 Yordam", callback_data="help_info")
+    )
+    return kb
 
-# --- START ---
-@dp.message(Command("start"))
+# --- 4. ASOSIY HANDLERLAR ---
+@dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
-    get_user(message.from_user.id) # Bazaga qo'shish
-    text = f"👋 Assalomu alaykum! {message.from_user.first_name}\n\n🟦 @SaleSeenBot ga xush kelibsiz!"
-    await message.answer(text, reply_markup=main_menu())
-
-# --- HISOBIM (7-RASM) ---
-@dp.message(F.text == "💰 Hisobim")
-async def my_account(message: types.Message):
-    balance, total_in, _ = get_user(message.from_user.id)
-    text = (
-        "🏰 Kabinetingizga xush kelibsiz.\n\n"
-        f"🆔 ID raqam: {message.from_user.id}\n"
-        f"💵 Hisobingiz: {balance:,} so'm\n"
-        f"✅ Kiritgan pullaringiz: {total_in:,} so'm"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💰 Hisob To'ldirish", callback_data="p4")]
-    ])
-    await message.answer(text, reply_markup=kb)
-
-# --- CLICK TO'LOV BOSHQARUVI ---
-@dp.message(F.text == "💰 Hisob To'ldirish")
-async def pay_init(message: types.Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔵 CLICK Up [ Avto ]", callback_data="p4")]
-    ])
-    await message.answer("💰 To'lov tizimini tanlang:", reply_markup=kb)
-
-@dp.callback_query(F.data == "p4")
-async def click_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("💸 To'lov summasini kiriting (faqat raqam):")
-    await state.set_state(PaymentState.waiting_for_amount)
-
-@dp.message(PaymentState.waiting_for_amount)
-async def send_invoice(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        return await message.answer("❌ Faqat raqam yuboring!")
-    
-    amount = int(message.text)
-    await state.clear()
-    
-    await message.answer_invoice(
-        title="Balansni to'ldirish",
-        description=f"Hisobga {amount:,} so'm qo'shish",
-        provider_token=CLICK_TOKEN,
-        currency="UZS",
-        prices=[LabeledPrice(label="To'lov", amount=amount * 100)],
-        payload=f"topup_{message.from_user.id}"
-    )
-
-@dp.pre_checkout_query()
-async def checkout_check(query: PreCheckoutQuery):
-    await query.answer(ok=True)
-
-@dp.message(F.successful_payment)
-async def pay_done(message: types.Message):
-    amount = message.successful_payment.total_amount // 100
     user_id = message.from_user.id
+    conn = sqlite3.connect("bot_base.db")
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+    conn.close()
     
-    # BAZANI YANGILASH
-    cursor.execute("UPDATE users SET balance = balance + ?, total_in = total_in + ? WHERE id = ?", (amount, amount, user_id))
-    db.commit()
+    await message.answer(f"👋 Salom {message.from_user.first_name}!\nNakrutka botiga xush kelibsiz.", 
+                         reply_markup=main_menu())
+
+@dp.callback_query_handler(lambda c: c.data == 'check_balance')
+async def balance_cb(callback_query: types.CallbackQuery):
+    balance = get_balance(callback_query.from_user.id)
+    await bot.send_message(callback_query.from_user.id, f"💵 Sizning balansingiz: **{balance} so'm**", parse_mode=ParseMode.MARKDOWN)
+
+@dp.callback_query_handler(lambda c: c.data == 'fill_balance')
+async def fill_cb(callback_query: types.CallbackQuery):
+    text = (f"💳 **To'lov ma'lumotlari:**\n\n"
+            f"Karta: `{KARTA_RAQAM}`\n"
+            f"Ega: (Ismingiz)\n\n"
+            f"Pulni o'tkazib, chekni (rasmni) shu yerga yuboring. Admin tasdiqlagach balansga tushadi.")
+    await bot.send_message(callback_query.from_user.id, text, parse_mode=ParseMode.MARKDOWN)
+
+# --- 5. ADMIN BUYRUQLARI ---
+@dp.message_handler(commands=['pay'])
+async def process_pay(message: types.Message):
+    if message.from_user.id == ADMIN_ID:
+        try:
+            parts = message.text.split()
+            u_id, amount = int(parts[1]), int(parts[2])
+            update_balance(u_id, amount)
+            await message.answer(f"✅ ID {u_id} balansiga {amount} so'm qo'shildi.")
+            await bot.send_message(u_id, f"✅ Hisobingiz {amount} so'mga to'ldirildi!")
+        except:
+            await message.answer("Xato! Namuna: `/pay ID SUMMA`")
+
+@dp.message_handler(content_types=['photo'])
+async def handle_receipt(message: types.Message):
+    user_id = message.from_user.id
+    await bot.send_photo(ADMIN_ID, message.photo[-1].file_id, 
+                         caption=f"🔔 **Yangi to'lov cheki!**\nID: `{user_id}`\n\nBalans qo'shish: `/pay {user_id} 10000`",
+                         parse_mode=ParseMode.MARKDOWN)
+    await message.answer("✅ Chek adminga yuborildi. Tekshiruvdan so'ng balans to'ldiriladi.")
+
+# --- 6. BUYURTMA BERISH ---
+@dp.callback_query_handler(lambda c: c.data == 'order_start')
+async def order_info(callback_query: types.CallbackQuery):
+    await bot.send_message(callback_query.from_user.id, 
+                           "🛒 Buyurtma berish uchun quyidagicha yozing:\n\n"
+                           "`buyurtma XIZMAT_ID LINK MIQDOR`\n\n"
+                           "Masalan: `buyurtma 1024 https://t.me/kanal 1000`", 
+                           parse_mode=ParseMode.MARKDOWN)
+
+@dp.message_handler(lambda message: message.text.startswith('buyurtma'))
+async def make_order(message: types.Message):
+    user_id = message.from_user.id
+    balance = get_balance(user_id)
     
-    await message.answer(f"✅ Tabriklaymiz! Hisobingizga {amount:,} so'm qo'shildi.")
+    # DIQQAT: Narxni hisoblashni panel API orqali yoki qo'lda qilishingiz kerak
+    price = 5000 # Misol: 1000 ta obunachi 5000 so'm
+    
+    if balance < price:
+        await message.answer("❌ Mablag' yetarli emas. Iltimos, hisobingizni to'ldiring.")
+        return
 
-# --- BOTNI ISHGA TUSHIRISH ---
-async def main():
-    await dp.start_polling(bot)
+    try:
+        data = message.text.split()
+        s_id, s_link, s_qty = data[1], data[2], data[3]
+        
+        # Panelga so'rov
+        payload = {'key': PANEL_API_KEY, 'action': 'add', 'service': s_id, 'link': s_link, 'quantity': s_qty}
+        res = requests.post(PANEL_URL, data=payload).json()
+        
+        if 'order' in res:
+            update_balance(user_id, -price)
+            await message.answer(f"✅ Buyurtma qabul qilindi! ID: {res['order']}\nBalansdan {price} so'm yechildi.")
+        else:
+            await message.answer(f"❌ Xato: {res.get('error', 'Noma`lum xato')}")
+    except:
+        await message.answer("❌ Xato format. Namuna: `buyurtma 1024 link 1000`")
 
+# --- 7. ISHGA TUSHIRISH ---
 if __name__ == '__main__':
-    asyncio.run(main())
+    init_db()
+    executor.start_polling(dp, skip_updates=True)
     
