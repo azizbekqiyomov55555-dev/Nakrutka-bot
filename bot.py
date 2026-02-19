@@ -1,167 +1,89 @@
 import logging
-import sqlite3
-import asyncio
-import secrets
-import aiohttp
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from aiogram import Bot, Dispatcher, types, executor
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- SOZLAMALAR ---
+# Ma'lumotlar
 API_TOKEN = '8066717720:AAEe3NoBcug1rTFT428HEBmJriwiutyWtr8'
-ADMIN_ID = 8537782289 
+ADMIN_ID = 8537782289
 
+# Logging
 logging.basicConfig(level=logging.INFO)
-bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher(storage=MemoryStorage())
 
-# --- HOLATLAR ---
-class OrderState(StatesGroup):
-    waiting_for_quantity = State()
-    waiting_for_link = State()
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
 
-class AdminStates(StatesGroup):
-    waiting_for_smm_url = State()
-    waiting_for_smm_key = State()
-    waiting_for_num_url = State()
-    waiting_for_num_key = State()
+# --- KLAVIATURALAR ---
 
-# --- BAZA ---
-def init_db():
-    conn = sqlite3.connect("sale_seen.db")
-    conn.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, balance INTEGER DEFAULT 0, api_key TEXT)")
-    conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
-    conn.commit()
-    conn.close()
-
-init_db()
-
-def get_db(): return sqlite3.connect("sale_seen.db")
-
-def get_setting(key):
-    with get_db() as conn:
-        res = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-    return res[0] if res else None
-
-# --- ADMIN PANEL ---
-@dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
-async def admin_panel(message: types.Message):
-    builder = InlineKeyboardBuilder()
-    # SMM API tugmalari
-    builder.row(types.InlineKeyboardButton(text="🛒 SMM API URL", callback_data="set_smm_url"),
-                types.InlineKeyboardButton(text="🔑 SMM API KEY", callback_data="set_smm_key"))
-    # Nomer API tugmalari
-    builder.row(types.InlineKeyboardButton(text="📲 Nomer API URL", callback_data="set_num_url"),
-                types.InlineKeyboardButton(text="🔑 Nomer API KEY", callback_data="set_num_key"))
-    
-    status = f"""🛠 <b>Admin Panel</b>
-    
-SMM URL: <code>{get_setting('smm_url')}</code>
-Nomer URL: <code>{get_setting('num_url')}</code>"""
-    
-    await message.answer(status, reply_markup=builder.as_markup())
-
-# --- ADMIN INPUT HANDLING (SMM & NOMER) ---
-@dp.callback_query(F.data.startswith("set_"))
-async def admin_set_api(call: types.CallbackQuery, state: FSMContext):
-    target = call.data
-    await call.message.answer(f"✍️ Ma'lumotni yuboring ({target}):")
-    if target == "set_smm_url": await state.set_state(AdminStates.waiting_for_smm_url)
-    elif target == "set_smm_key": await state.set_state(AdminStates.waiting_for_smm_key)
-    elif target == "set_num_url": await state.set_state(AdminStates.waiting_for_num_url)
-    elif target == "set_num_key": await state.set_state(AdminStates.waiting_for_num_key)
-
-@dp.message(AdminStates.waiting_for_smm_url)
-async def save_smm_url(message: types.Message, state: FSMContext):
-    with get_db() as conn: conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('smm_url', ?)", (message.text,))
-    await message.answer("✅ SMM URL saqlandi!"); await state.clear()
-
-@dp.message(AdminStates.waiting_for_num_url)
-async def save_num_url(message: types.Message, state: FSMContext):
-    with get_db() as conn: conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('num_url', ?)", (message.text,))
-    await message.answer("✅ Nomer API URL saqlandi!"); await state.clear()
-
-@dp.message(AdminStates.waiting_for_smm_key)
-async def save_smm_key(message: types.Message, state: FSMContext):
-    with get_db() as conn: conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('smm_key', ?)", (message.text,))
-    await message.answer("✅ SMM KEY saqlandi!"); await state.clear()
-
-@dp.message(AdminStates.waiting_for_num_key)
-async def save_num_key(message: types.Message, state: FSMContext):
-    with get_db() as conn: conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('num_key', ?)", (message.text,))
-    await message.answer("✅ Nomer KEY saqlandi!"); await state.clear()
-
-# --- XIZMATLARNI API DAN YUKLASH ---
-@dp.message(F.text == "🛍 Xizmatlar")
-async def show_cats(message: types.Message):
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="🔵 Telegram", callback_data="list_Telegram"),
-                types.InlineKeyboardButton(text="🟣 Instagram", callback_data="list_Instagram"))
-    builder.row(types.InlineKeyboardButton(text="🛒 Barcha xizmatlar", callback_data="list_all"))
-    await message.answer("✅ Tarmoqni tanlang:", reply_markup=builder.as_markup())
-
-@dp.callback_query(F.data.startswith("list_"))
-async def list_services(call: types.CallbackQuery):
-    cat = call.data.split("_")[1]
-    url = get_setting("smm_url")
-    key = get_setting("smm_key")
-    
-    if not url or not key: return await call.answer("❌ Admin SMM API ni sozlamagan!", show_alert=True)
-
-    await call.answer("Xizmatlar yuklanmoqda...")
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, data={'key': key, 'action': 'services'}) as resp:
-            services = await resp.json()
-            builder = InlineKeyboardBuilder()
-            for s in services:
-                if cat == "all" or cat.lower() in s['name'].lower() or cat.lower() in s.get('category','').lower():
-                    builder.row(types.InlineKeyboardButton(text=f"{s['name']} - {s['rate']} so'm", 
-                                                         callback_data=f"buy_{s['service']}_{s['min']}_{s['max']}"))
-            
-            builder.row(types.InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_cats"))
-            await call.message.edit_text(f"🛍 <b>{cat} xizmatlari:</b>", reply_markup=builder.as_markup())
-
-# --- BUYURTMA (MIQDOR VA LINK) ---
-@dp.callback_query(F.data.startswith("buy_"))
-async def start_order(call: types.CallbackQuery, state: FSMContext):
-    d = call.data.split("_")
-    await state.update_data(s_id=d[1], min_q=d[2], max_q=d[3])
-    await call.message.answer(f"🔢 <b>Miqdorni kiriting:</b>\n(Min: {d[2]} - Max: {d[3]})")
-    await state.set_state(OrderState.waiting_for_quantity)
-
-@dp.message(OrderState.waiting_for_quantity)
-async def get_qty(message: types.Message, state: FSMContext):
-    if not message.text.isdigit(): return await message.answer("Faqat raqam!")
-    await state.update_data(qty=message.text)
-    await message.answer("🔗 <b>Manzilni (Link) yuboring:</b>")
-    await state.set_state(OrderState.waiting_for_link)
-
-@dp.message(OrderState.waiting_for_link)
-async def get_link(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    # API buyurtma yuborish kodi shu yerda bo'ladi
-    await message.answer(f"✅ Buyurtma qabul qilindi!\nID: {data['s_id']}\nMiqdor: {data['qty']}\nLink: {message.text}")
-    await state.clear()
-
-# --- MENYU TUGMALARI ---
 def main_menu():
-    builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="🛍 Xizmatlar"), types.KeyboardButton(text="📲 Nomer olish"))
-    builder.row(types.KeyboardButton(text="🤝 Hamkorlik"))
-    return builder.as_markup(resize_keyboard=True)
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add(
+        KeyboardButton("🛍 Xizmatlar"), KeyboardButton("📲 Nomer olish"),
+        KeyboardButton("🛒 Buyurtmalarim"), KeyboardButton("👥 Pul ishlash"),
+        KeyboardButton("💰 Hisobim"), KeyboardButton("💰 Hisob To'ldirish"),
+        KeyboardButton("📩 Murojaat"), KeyboardButton("☎️ Qo'llab-quvvatlash")
+    )
+    markup.row(KeyboardButton("🤝 Hamkorlik"))
+    return markup
 
-@dp.message(Command("start"))
-async def start(message: types.Message):
-    await message.answer("Asosiy menyu", reply_markup=main_menu())
+def admin_menu():
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("📊 Statistika", callback_data="stats"),
+        InlineKeyboardButton("📢 Reklama yuborish", callback_data="broadcast"),
+        InlineKeyboardButton("➕ Pul qo'shish (User ID orqali)", callback_data="add_money")
+    )
+    return markup
 
-async def main():
-    await dp.start_polling(bot)
+# --- HANDLERLAR ---
 
+@dp.message_handler(commands=['start'])
+async def send_welcome(message: types.Message):
+    user_name = message.from_user.first_name
+    welcome_text = (
+        f"👋 Assalomu alaykum! {user_name}\n\n"
+        f"🤖 @SaleSeenBot nusxasiga xush kelibsiz!\n"
+        f"Ushbu bot orqali barcha ijtimoiy tarmoqlarga sifatli NAKRUTKA "
+        f"va virtual raqamlar olishingiz mumkin."
+    )
+    await message.answer(welcome_text, reply_markup=main_menu())
+
+@dp.message_handler(commands=['admin'])
+async def admin_panel(message: types.Message):
+    if message.from_id == ADMIN_ID:
+        await message.answer("🛠 Admin panelga xush kelibsiz:", reply_markup=admin_menu())
+    else:
+        await message.answer("❌ Siz admin emassiz!")
+
+@dp.message_handler(lambda message: message.text == "💰 Hisobim")
+async def my_account(message: types.Message):
+    text = (
+        f"🗂 Kabinetingizga xush kelibsiz.\n\n"
+        f"🆔 ID raqam: {message.from_id}\n"
+        f"💵 Hisobingiz: 0 so'm\n"
+        f"✅ Kiritgan pullaringiz: 0 so'm"
+    )
+    await message.answer(text)
+
+@dp.message_handler(lambda message: message.text == "📲 Nomer olish")
+async def get_number(message: types.Message):
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("Bangladesh 🇧🇩 - 8958 so'm", callback_data="buy_bd"),
+        InlineKeyboardButton("Hindiston 🇮🇳 - 11197 so'm", callback_data="buy_in")
+    )
+    await message.answer("👇 Kerakli davlatni tanlang:", reply_markup=markup)
+
+@dp.message_handler(lambda message: message.text == "🤝 Hamkorlik")
+async def partnership(message: types.Message):
+    text = "🤝 Hamkorlik dasturi. Biz bilan yangi daromad manbaingizni yarating."
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("🔥 SMM Panel API", callback_data="smm_api"),
+        InlineKeyboardButton("☎️ TG Nomer API", callback_data="num_api")
+    )
+    await message.answer(text, reply_markup=markup)
+
+# --- BOTNI ISHGA TUSHIRISH ---
 if __name__ == '__main__':
-    asyncio.run(main())
+    executor.start_polling(dp, skip_updates=True)
     
