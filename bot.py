@@ -14,13 +14,14 @@ API_TOKEN = '8066717720:AAEe3NoBcug1rTFT428HEBmJriwiutyWtr8'
 
 logging.basicConfig(level=logging.INFO)
 
+# Railway xatosini oldini olish uchun DefaultBotProperties ishlatildi
 bot = Bot(
     token=API_TOKEN, 
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 dp = Dispatcher(storage=MemoryStorage())
 
-# --- BAZANI SOZLASH ---
+# --- BAZA SOZLAMALARI ---
 def init_db():
     conn = sqlite3.connect("sale_seen.db")
     cursor = conn.cursor()
@@ -60,32 +61,13 @@ async def start_cmd(message: types.Message):
     welcome_text = (
         f"👋 <b>Assalomu alaykum! {message.from_user.first_name}</b>\n\n"
         f"💙 @SaleSeenBot ga xush kelibsiz!\n\n"
-        f"Ushbu bot orqali siz barcha platformalarga sifatli <b>NAKRUTKA</b> va "
-        f"boshqa xizmatlardan foydalanishingiz mumkin."
+        f"Ushbu bot orqali siz barcha platformalarga shuningdek:\n"
+        f"🔵 Telegram,\n📸 Instagram,\n🎬 TikTok,\n🔴 YouTube va boshqa tarmoqlarga "
+        f"sifatli va hamyonbop <b>NAKRUTKA</b> va boshqa xizmatlardan foydalanishingiz mumkin."
     )
     await message.answer(welcome_text, reply_markup=main_menu())
 
-# --- NOMER OLISH BO'LIMI (SIZ SO'RAGAN QISM) ---
-@dp.message(F.text == "📲 Nomer olish")
-async def get_number_section(message: types.Message):
-    builder = InlineKeyboardBuilder()
-    # Rasmga mos kategoriyalar
-    builder.row(types.InlineKeyboardButton(text="🔹 Telegram", callback_data="num_tg"))
-    builder.row(types.InlineKeyboardButton(text="🔸 Instagram", callback_data="num_inst"))
-    builder.row(types.InlineKeyboardButton(text="🎬 TikTok", callback_data="num_tt"))
-    builder.row(types.InlineKeyboardButton(text="🔴 YouTube", callback_data="num_yt"))
-    builder.row(types.InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_main"))
-    builder.adjust(2, 2, 1)
-
-    text = (
-        "📲 <b>Virtual nomerlar bo'limi</b>\n\n"
-        "Siz ushbu bo'lim orqali ijtimoiy tarmoqlar uchun virtual nomerlarni "
-        "avtomatik tarzda sotib olishingiz mumkin.\n\n"
-        "📋 <b>Kerakli tarmoqni tanlang:</b>"
-    )
-    await message.answer(text, reply_markup=builder.as_markup())
-
-# --- HAMKORLIK BO'LIMI ---
+# --- HAMKORLIK ASOSIY (Rasm 4 va 5 ga mos) ---
 @dp.message(F.text == "🤝 Hamkorlik")
 async def collab_main(message: types.Message):
     builder = InlineKeyboardBuilder()
@@ -101,24 +83,43 @@ async def collab_main(message: types.Message):
     )
     await message.answer(text, reply_markup=builder.as_markup())
 
-# --- CALLBACK HANDLERLAR (SMM Panel va API qismlari) ---
+# --- SMM PANEL TIZIMI (Rasm 6 ga mos) ---
 @dp.callback_query(F.data == "collab_smm")
 async def smm_panel(call: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="🔑 API Kalit", callback_data="show_api"))
-    builder.row(types.InlineKeyboardButton(text="💼 Qo'llanmalar", callback_data="guides"))
+    builder.row(
+        types.InlineKeyboardButton(text="🔑 API Kalit", callback_data="show_api_smm"),
+        types.InlineKeyboardButton(text="💼 Qo'llanmalar", callback_data="guides_smm")
+    )
     builder.row(types.InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_collab"))
     
     text = "🔥 <b>SMM Panel - tizimi</b>\n\n📋 Ushbu tizim orqali siz SMM xizmatlariga API orqali buyurtma qilishingiz mumkin"
     await call.message.edit_text(text, reply_markup=builder.as_markup())
 
-@dp.callback_query(F.data.in_({"show_api", "refresh_api"}))
-async def api_key_page(call: types.CallbackQuery):
+# --- NOMER API TIZIMI (Rasm 10 ga mos) ---
+@dp.callback_query(F.data == "collab_nomer")
+async def nomer_api_panel(call: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="🔑 API Kalit", callback_data="show_api_nomer"),
+        types.InlineKeyboardButton(text="💼 Qo'llanmalar", callback_data="guides_nomer")
+    )
+    builder.row(types.InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_collab"))
+    
+    text = "☎️ <b>Nomer API - tizimi</b>\n\n📋 Ushbu tizim orqali siz Tayyor Akkauntlarga API olishingiz mumkin"
+    await call.message.edit_text(text, reply_markup=builder.as_markup())
+
+# --- API KALIT VA YANGILASH (Rasm 7, 8, 9 ga mos) ---
+@dp.callback_query(F.data.startswith("show_api_") | F.data.startswith("refresh_api_"))
+async def api_key_handler(call: types.CallbackQuery):
     user_id = call.from_user.id
+    # Qaysi bo'limdan kelganini aniqlash (smm yoki nomer)
+    current_section = "collab_smm" if "smm" in call.data else "collab_nomer"
+    
     conn = sqlite3.connect("sale_seen.db")
     cursor = conn.cursor()
     
-    if call.data == "refresh_api":
+    if "refresh_api_" in call.data:
         new_key = secrets.token_hex(16)
         cursor.execute("UPDATE users SET api_key = ? WHERE id = ?", (new_key, user_id))
         conn.commit()
@@ -128,32 +129,47 @@ async def api_key_page(call: types.CallbackQuery):
     conn.close()
     
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="♻️ API kalitni yangilash", callback_data="refresh_api"))
-    builder.row(types.InlineKeyboardButton(text="🔙 Orqaga", callback_data="collab_smm"))
+    builder.row(types.InlineKeyboardButton(text="♻️ API kalitni yangilash", callback_data=f"refresh_api_{current_section}"))
+    builder.row(types.InlineKeyboardButton(text="🔙 Orqaga", callback_data=current_section))
     
-    text = (
-        f"📌 <b>Sizning API Manzilingiz</b> 👇:\n<code>https://saleseen.uz/api/v2</code>\n\n"
-        f"📋 <b>Sizning API kalitingiz</b> 👇:\n<code>{api_key}</code>"
-    )
+    if "guides" in call.data or (hasattr(call, 'message') and "dokumentlar" in call.message.text.lower()):
+        text = f"Api urllar va dokumentlar 💼 Qo'llanmalar bo'limida.\n\n📋 <b>Sizning API kalitingiz</b> 👇:\n<code>{api_key}</code>"
+    else:
+        text = (
+            f"📌 <b>Sizning API Manzilingiz</b> 👇:\n<code>https://saleseen.uz/api/v2</code>\n\n"
+            f"📋 <b>Sizning API kalitingiz</b> 👇:\n<code>{api_key}</code>"
+        )
+    
     await call.message.edit_text(text, reply_markup=builder.as_markup())
 
+# --- QO'LLANMALAR (Rasm 9 ga mos) ---
+@dp.callback_query(F.data.startswith("guides_"))
+async def guides_handler(call: types.CallbackQuery):
+    user_id = call.from_user.id
+    current_section = "collab_smm" if "smm" in call.data else "collab_nomer"
+    
+    conn = sqlite3.connect("sale_seen.db")
+    api_key = conn.execute("SELECT api_key FROM users WHERE id = ?", (user_id,)).fetchone()[0]
+    conn.close()
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="♻️ API kalitni yangilash", callback_data=f"refresh_api_{current_section}"))
+    builder.row(types.InlineKeyboardButton(text="🔙 Orqaga", callback_data=current_section))
+    
+    text = f"Api urllar va dokumentlar 💼 Qo'llanmalar bo'limida.\n\n📋 <b>Sizning API kalitingiz</b> 👇:\n<code>{api_key}</code>"
+    await call.message.edit_text(text, reply_markup=builder.as_markup())
+
+# --- ORQAGA QAYTISH ---
 @dp.callback_query(F.data == "back_to_collab")
 async def back_to_collab_handler(call: types.CallbackQuery):
-    await collab_main(call.message)
-    await call.answer()
-
-@dp.callback_query(F.data == "back_to_main")
-async def back_to_main_handler(call: types.CallbackQuery):
-    await call.message.delete()
-    await call.message.answer("Asosiy menyuga qaytdingiz.", reply_markup=main_menu())
-
-# --- QOLGAN TUGMALAR ---
-@dp.message(F.text == "💵 Hisobim")
-async def profile(message: types.Message):
-    conn = sqlite3.connect("sale_seen.db")
-    res = conn.execute("SELECT balance FROM users WHERE id = ?", (message.from_user.id,)).fetchone()
-    conn.close()
-    await message.answer(f"💰 Sizning balansingiz: <b>{res[0]} so'm</b>")
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🔥 SMM Panel API", callback_data="collab_smm"))
+    builder.row(types.InlineKeyboardButton(text="☎️ TG Nomer API", callback_data="collab_nomer"))
+    builder.row(types.InlineKeyboardButton(text="🤖 SMM Bot Yaratish", callback_data="collab_bot"))
+    builder.adjust(1)
+    
+    text = "🤝 <b>Hamkorlik dasturi...</b>\n\n📋 <b>Kerakli bo'limni tanlang:</b>"
+    await call.message.edit_text(text, reply_markup=builder.as_markup())
 
 # --- ISHGA TUSHIRISH ---
 async def main():
@@ -163,5 +179,5 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logging.info("Bot to'xtatildi")
+        pass
     
