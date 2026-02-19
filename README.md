@@ -1,1 +1,0 @@
-# Nakrutka-bot
