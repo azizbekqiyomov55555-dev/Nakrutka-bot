@@ -6,7 +6,7 @@ from aiogram.types import Message
 from app.db import init_db, add_user, get_user, update_balance
 from app.keyboards import main_menu
 
-TOKEN = ("8066717720:AAEe3NoBcug1rTFT428HEBmJriwiutyWtr8")  # Railway env ga qo'yiladi
+TOKEN = ("8066717720:AAF1z_9_CvRVEFG0QB-igSBwdOicL3UTtAA")  # Railway env ga qo'yiladi
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
