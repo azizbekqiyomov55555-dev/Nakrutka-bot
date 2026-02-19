@@ -9,7 +9,7 @@ from aiogram.types import (
 )
 from aiogram.filters import CommandStart
 
-TOKEN = "8598925821:AAFUmytYQP2dw40SWZ42VGR0NOT3_U1JnPQ"
+TOKEN = "8204656176:AAFjhXNXi7WJSBbe3eEj18_x5xbqVXUvjII"
 ADMIN_ID = 8537782289
 
 bot = Bot(token=TOKEN)
