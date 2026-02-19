@@ -11,7 +11,7 @@ from aiogram.types import (
 from aiogram.filters import CommandStart
 
 # ================= CONFIG =================
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = "8351799267:AAH7Zm1LBW4q5yT3AoFpdOBimAKkLj-2CVE"
 ADMIN_ID = "8537782289"
 
 bot = Bot(token=TOKEN)
